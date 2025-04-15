@@ -1,17 +1,22 @@
 
 import { createContext, useContext, useState, ReactNode, useEffect } from "react";
-import { Task, Category } from "@/types";
+import { Task, Category, mapSupabaseTask, mapSupabaseCategory } from "@/types";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 interface TaskContextType {
   tasks: Task[];
   categories: Category[];
-  addTask: (task: Omit<Task, "id" | "createdAt">) => void;
-  updateTask: (id: string, updates: Partial<Task>) => void;
-  deleteTask: (id: string) => void;
-  addCategory: (category: Omit<Category, "id">) => void;
-  updateCategory: (id: string, updates: Partial<Category>) => void;
-  deleteCategory: (id: string) => void;
+  addTask: (task: Omit<Task, "id" | "createdAt" | "userId">) => Promise<void>;
+  updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  addCategory: (category: Omit<Category, "id" | "userId">) => Promise<void>;
+  updateCategory: (id: string, updates: Partial<Category>) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
   getTasksByCategory: (categoryId: string) => Task[];
+  isLoading: boolean;
+  error: string | null;
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -27,84 +32,300 @@ export const useTasks = () => {
 export const TaskProvider = ({ children }: { children: ReactNode }) => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { user, isAuthenticated } = useAuth();
+  const { toast } = useToast();
 
-  // Load tasks and categories from localStorage on initial render
+  // Fetch data when authenticated
   useEffect(() => {
-    const storedTasks = localStorage.getItem("quickTaskTasks");
-    const storedCategories = localStorage.getItem("quickTaskCategories");
+    let categoriesSubscription: any;
+    let tasksSubscription: any;
     
-    if (storedTasks) {
-      try {
-        setTasks(JSON.parse(storedTasks));
-      } catch (e) {
-        localStorage.removeItem("quickTaskTasks");
+    const fetchData = async () => {
+      if (!isAuthenticated || !user) {
+        setTasks([]);
+        setCategories([]);
+        setIsLoading(false);
+        return;
       }
-    }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // Fetch categories
+        const { data: categoriesData, error: categoriesError } = await supabase
+          .from('categories')
+          .select('*')
+          .eq('user_id', user.id);
+          
+        if (categoriesError) {
+          throw categoriesError;
+        }
+        
+        const mappedCategories = categoriesData.map(mapSupabaseCategory);
+        setCategories(mappedCategories);
+        
+        // Create default categories if none exist
+        if (categoriesData.length === 0) {
+          const defaultCategories = [
+            { name: "Personal", color: "#6366F1" },
+            { name: "Work", color: "#F59E0B" },
+            { name: "Health", color: "#10B981" },
+          ];
+          
+          for (const category of defaultCategories) {
+            await addCategory(category);
+          }
+        }
+        
+        // Fetch tasks
+        const { data: tasksData, error: tasksError } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('user_id', user.id);
+          
+        if (tasksError) {
+          throw tasksError;
+        }
+        
+        const mappedTasks = tasksData.map(mapSupabaseTask);
+        setTasks(mappedTasks);
+        
+        // Set up real-time subscriptions
+        categoriesSubscription = supabase
+          .channel('categories-changes')
+          .on('postgres_changes', { 
+            event: '*', 
+            schema: 'public', 
+            table: 'categories',
+            filter: `user_id=eq.${user.id}`
+          }, 
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              setCategories(prev => [...prev, mapSupabaseCategory(payload.new)]);
+            } else if (payload.eventType === 'UPDATE') {
+              setCategories(prev => 
+                prev.map(cat => cat.id === payload.new.id ? mapSupabaseCategory(payload.new) : cat)
+              );
+            } else if (payload.eventType === 'DELETE') {
+              setCategories(prev => prev.filter(cat => cat.id !== payload.old.id));
+            }
+          })
+          .subscribe();
+        
+        tasksSubscription = supabase
+          .channel('tasks-changes')
+          .on('postgres_changes', { 
+            event: '*', 
+            schema: 'public', 
+            table: 'tasks',
+            filter: `user_id=eq.${user.id}`
+          }, 
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              setTasks(prev => [...prev, mapSupabaseTask(payload.new)]);
+            } else if (payload.eventType === 'UPDATE') {
+              setTasks(prev => 
+                prev.map(task => task.id === payload.new.id ? mapSupabaseTask(payload.new) : task)
+              );
+            } else if (payload.eventType === 'DELETE') {
+              setTasks(prev => prev.filter(task => task.id !== payload.old.id));
+            }
+          })
+          .subscribe();
+          
+      } catch (err: any) {
+        console.error('Error fetching data:', err);
+        setError(err.message || 'Failed to load tasks and categories');
+        toast({
+          title: "Error loading data",
+          description: err.message || 'Failed to load tasks and categories',
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+
+    return () => {
+      if (categoriesSubscription) categoriesSubscription.unsubscribe();
+      if (tasksSubscription) tasksSubscription.unsubscribe();
+    };
+  }, [isAuthenticated, user, toast]);
+
+  const addTask = async (task: Omit<Task, "id" | "createdAt" | "userId">) => {
+    if (!user) return;
     
-    if (storedCategories) {
-      try {
-        setCategories(JSON.parse(storedCategories));
-      } catch (e) {
-        localStorage.removeItem("quickTaskCategories");
-      }
-    } else {
-      // Add default categories if none exist
-      const defaultCategories: Category[] = [
-        { id: "category_1", name: "Personal", color: "#6366F1" },
-        { id: "category_2", name: "Work", color: "#F59E0B" },
-        { id: "category_3", name: "Health", color: "#10B981" },
-      ];
-      setCategories(defaultCategories);
-      localStorage.setItem("quickTaskCategories", JSON.stringify(defaultCategories));
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert({
+          title: task.title,
+          description: task.description || null,
+          completed: task.completed,
+          category_id: task.categoryId,
+          user_id: user.id
+        })
+        .select()
+        .single();
+        
+      if (error) throw error;
+      
+    } catch (err: any) {
+      console.error('Error adding task:', err);
+      toast({
+        title: "Failed to add task",
+        description: err.message,
+        variant: "destructive",
+      });
+      throw err;
     }
-  }, []);
-
-  // Update localStorage whenever tasks or categories change
-  useEffect(() => {
-    localStorage.setItem("quickTaskTasks", JSON.stringify(tasks));
-  }, [tasks]);
-
-  useEffect(() => {
-    localStorage.setItem("quickTaskCategories", JSON.stringify(categories));
-  }, [categories]);
-
-  const addTask = (task: Omit<Task, "id" | "createdAt">) => {
-    const newTask: Task = {
-      ...task,
-      id: "task_" + Math.random().toString(36).substring(2, 9),
-      createdAt: new Date().toISOString(),
-    };
-    setTasks((prev) => [...prev, newTask]);
   };
 
-  const updateTask = (id: string, updates: Partial<Task>) => {
-    setTasks((prev) =>
-      prev.map((task) => (task.id === id ? { ...task, ...updates } : task))
-    );
+  const updateTask = async (id: string, updates: Partial<Task>) => {
+    if (!user) return;
+    
+    try {
+      const updateData: any = {};
+      
+      if (updates.title !== undefined) updateData.title = updates.title;
+      if (updates.description !== undefined) updateData.description = updates.description;
+      if (updates.completed !== undefined) updateData.completed = updates.completed;
+      if (updates.categoryId !== undefined) updateData.category_id = updates.categoryId;
+      
+      const { error } = await supabase
+        .from('tasks')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_id', user.id);
+        
+      if (error) throw error;
+      
+    } catch (err: any) {
+      console.error('Error updating task:', err);
+      toast({
+        title: "Failed to update task",
+        description: err.message,
+        variant: "destructive",
+      });
+      throw err;
+    }
   };
 
-  const deleteTask = (id: string) => {
-    setTasks((prev) => prev.filter((task) => task.id !== id));
+  const deleteTask = async (id: string) => {
+    if (!user) return;
+    
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+        
+      if (error) throw error;
+      
+    } catch (err: any) {
+      console.error('Error deleting task:', err);
+      toast({
+        title: "Failed to delete task",
+        description: err.message,
+        variant: "destructive",
+      });
+      throw err;
+    }
   };
 
-  const addCategory = (category: Omit<Category, "id">) => {
-    const newCategory: Category = {
-      ...category,
-      id: "category_" + Math.random().toString(36).substring(2, 9),
-    };
-    setCategories((prev) => [...prev, newCategory]);
+  const addCategory = async (category: Omit<Category, "id" | "userId">) => {
+    if (!user) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .insert({
+          name: category.name,
+          color: category.color,
+          user_id: user.id
+        })
+        .select()
+        .single();
+        
+      if (error) throw error;
+      
+      return mapSupabaseCategory(data);
+    } catch (err: any) {
+      console.error('Error adding category:', err);
+      toast({
+        title: "Failed to add category",
+        description: err.message,
+        variant: "destructive",
+      });
+      throw err;
+    }
   };
 
-  const updateCategory = (id: string, updates: Partial<Category>) => {
-    setCategories((prev) =>
-      prev.map((category) => (category.id === id ? { ...category, ...updates } : category))
-    );
+  const updateCategory = async (id: string, updates: Partial<Category>) => {
+    if (!user) return;
+    
+    try {
+      const updateData: any = {};
+      
+      if (updates.name !== undefined) updateData.name = updates.name;
+      if (updates.color !== undefined) updateData.color = updates.color;
+      
+      const { error } = await supabase
+        .from('categories')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_id', user.id);
+        
+      if (error) throw error;
+      
+    } catch (err: any) {
+      console.error('Error updating category:', err);
+      toast({
+        title: "Failed to update category",
+        description: err.message,
+        variant: "destructive",
+      });
+      throw err;
+    }
   };
 
-  const deleteCategory = (id: string) => {
-    setCategories((prev) => prev.filter((category) => category.id !== id));
-    // Delete all tasks in this category
-    setTasks((prev) => prev.filter((task) => task.categoryId !== id));
+  const deleteCategory = async (id: string) => {
+    if (!user) return;
+    
+    try {
+      // First delete all tasks in this category
+      const { error: tasksError } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('category_id', id)
+        .eq('user_id', user.id);
+        
+      if (tasksError) throw tasksError;
+      
+      // Then delete the category
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+        
+      if (error) throw error;
+      
+    } catch (err: any) {
+      console.error('Error deleting category:', err);
+      toast({
+        title: "Failed to delete category",
+        description: err.message,
+        variant: "destructive",
+      });
+      throw err;
+    }
   };
 
   const getTasksByCategory = (categoryId: string) => {
@@ -123,6 +344,8 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         updateCategory,
         deleteCategory,
         getTasksByCategory,
+        isLoading,
+        error
       }}
     >
       {children}

@@ -7,12 +7,15 @@ import Sidebar from "@/components/Sidebar";
 import TaskList from "@/components/TaskList";
 import TaskForm from "@/components/TaskForm";
 import { useTasks } from "@/context/TaskContext";
+import { Loader2 } from "lucide-react";
 
 const Dashboard = () => {
-  const { isAuthenticated, isLoading } = useAuth();
-  const { categories } = useTasks();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { categories, isLoading: tasksLoading } = useTasks();
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
+  
+  const isLoading = authLoading || tasksLoading;
   
   // Set the first category as active when categories load
   useEffect(() => {
@@ -21,11 +24,14 @@ const Dashboard = () => {
     }
   }, [categories, activeCategoryId]);
   
-  // If loading, show a simple loading indicator
+  // If loading, show a loading indicator
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse">Loading...</div>
+        <div className="flex flex-col items-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">Loading your tasks...</p>
+        </div>
       </div>
     );
   }

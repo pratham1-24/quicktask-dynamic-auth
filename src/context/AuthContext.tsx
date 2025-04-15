@@ -1,6 +1,8 @@
 
 import { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { User, AuthState } from "@/types";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface AuthContextType extends AuthState {
   login: (email: string, password: string) => Promise<void>;
@@ -24,82 +26,159 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     isAuthenticated: false,
     isLoading: true,
   });
+  const { toast } = useToast();
 
-  // Load user from localStorage on initial render
+  // Check for session on initial render
   useEffect(() => {
-    const storedUser = localStorage.getItem("quickTaskUser");
-    if (storedUser) {
+    const checkSession = async () => {
       try {
-        const user = JSON.parse(storedUser);
-        setAuthState({
-          user,
-          isAuthenticated: true,
-          isLoading: false,
-        });
-      } catch (e) {
-        localStorage.removeItem("quickTaskUser");
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error("Error checking session:", error);
+          setAuthState({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
+          return;
+        }
+        
+        if (session) {
+          const { user } = session;
+          setAuthState({
+            user: {
+              id: user.id,
+              email: user.email || "",
+              name: user.user_metadata?.name || user.email?.split('@')[0] || "",
+            },
+            isAuthenticated: true,
+            isLoading: false,
+          });
+        } else {
+          setAuthState({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
+        }
+      } catch (error) {
+        console.error("Session check failed:", error);
         setAuthState({
           user: null,
           isAuthenticated: false,
           isLoading: false,
         });
       }
-    } else {
-      setAuthState((prev) => ({ ...prev, isLoading: false }));
-    }
+    };
+
+    checkSession();
+
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
+          setAuthState({
+            user: {
+              id: session.user.id,
+              email: session.user.email || "",
+              name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || "",
+            },
+            isAuthenticated: true,
+            isLoading: false,
+          });
+        } else if (event === 'SIGNED_OUT') {
+          setAuthState({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // Mock authentication functions
   const login = async (email: string, password: string) => {
-    // Simulate API call
     setAuthState((prev) => ({ ...prev, isLoading: true }));
     
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    
-    // For demo purposes, any credentials will work
-    const user: User = {
-      id: "user_" + Math.random().toString(36).substring(2, 9),
-      email,
-      name: email.split('@')[0],
-    };
-    
-    localStorage.setItem("quickTaskUser", JSON.stringify(user));
-    
-    setAuthState({
-      user,
-      isAuthenticated: true,
-      isLoading: false,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      
+      if (error) {
+        toast({
+          title: "Login failed",
+          description: error.message,
+          variant: "destructive",
+        });
+        setAuthState((prev) => ({ ...prev, isLoading: false }));
+        throw error;
+      }
+      
+      // Auth state will be updated by the listener
+    } catch (error: any) {
+      setAuthState((prev) => ({ ...prev, isLoading: false }));
+      throw error;
+    }
   };
 
   const signup = async (email: string, password: string, name: string) => {
-    // Simulate API call
     setAuthState((prev) => ({ ...prev, isLoading: true }));
     
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    
-    const user: User = {
-      id: "user_" + Math.random().toString(36).substring(2, 9),
-      email,
-      name,
-    };
-    
-    localStorage.setItem("quickTaskUser", JSON.stringify(user));
-    
-    setAuthState({
-      user,
-      isAuthenticated: true,
-      isLoading: false,
-    });
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: name,
+          },
+        },
+      });
+      
+      if (error) {
+        toast({
+          title: "Signup failed",
+          description: error.message,
+          variant: "destructive",
+        });
+        setAuthState((prev) => ({ ...prev, isLoading: false }));
+        throw error;
+      }
+      
+      toast({
+        title: "Account created",
+        description: "Welcome to QuickTask!",
+      });
+      
+      // Auth state will be updated by the listener
+    } catch (error: any) {
+      setAuthState((prev) => ({ ...prev, isLoading: false }));
+      throw error;
+    }
   };
 
-  const logout = () => {
-    localStorage.removeItem("quickTaskUser");
-    setAuthState({
-      user: null,
-      isAuthenticated: false,
-      isLoading: false,
-    });
+  const logout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        toast({
+          title: "Logout failed",
+          description: error.message,
+          variant: "destructive",
+        });
+        console.error("Logout error:", error);
+      }
+      // Auth state will be updated by the listener
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   return (
