@@ -1,4 +1,3 @@
-
 import { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { Task, Category, mapSupabaseTask, mapSupabaseCategory } from "@/types";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,7 +36,6 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
   const { user, isAuthenticated } = useAuth();
   const { toast } = useToast();
 
-  // Fetch data when authenticated
   useEffect(() => {
     let categoriesSubscription: any;
     let tasksSubscription: any;
@@ -54,7 +52,6 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
       setError(null);
 
       try {
-        // Fetch categories
         const { data: categoriesData, error: categoriesError } = await supabase
           .from('categories')
           .select('*')
@@ -67,7 +64,6 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         const mappedCategories = categoriesData.map(mapSupabaseCategory);
         setCategories(mappedCategories);
         
-        // Create default categories if none exist
         if (categoriesData.length === 0) {
           const defaultCategories = [
             { name: "Personal", color: "#6366F1" },
@@ -80,7 +76,6 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
           }
         }
         
-        // Fetch tasks
         const { data: tasksData, error: tasksError } = await supabase
           .from('tasks')
           .select('*')
@@ -93,7 +88,6 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         const mappedTasks = tasksData.map(mapSupabaseTask);
         setTasks(mappedTasks);
         
-        // Set up real-time subscriptions
         categoriesSubscription = supabase
           .channel('categories-changes')
           .on('postgres_changes', { 
@@ -255,7 +249,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         
       if (error) throw error;
       
-      return mapSupabaseCategory(data);
+      return;
     } catch (err: any) {
       console.error('Error adding category:', err);
       toast({
@@ -299,7 +293,6 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
     
     try {
-      // First delete all tasks in this category
       const { error: tasksError } = await supabase
         .from('tasks')
         .delete()
@@ -308,7 +301,6 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         
       if (tasksError) throw tasksError;
       
-      // Then delete the category
       const { error } = await supabase
         .from('categories')
         .delete()
