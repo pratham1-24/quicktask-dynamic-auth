@@ -11,7 +11,7 @@ import { Loader2, Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { useMobile } from "@/hooks/use-mobile";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { motion } from "framer-motion";
 
 const Dashboard = () => {
@@ -20,7 +20,7 @@ const Dashboard = () => {
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const isMobile = useMobile();
+  const isMobile = useIsMobile();
   
   const isLoading = authLoading || tasksLoading;
   
@@ -55,10 +55,7 @@ const Dashboard = () => {
   
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <Header 
-        onAddTaskClick={() => setIsAddTaskOpen(true)} 
-        onMobileMenuClick={() => setMobileSidebarOpen(true)}
-      />
+      <Header onAddTaskClick={() => setIsAddTaskOpen(true)} />
       
       <div className="flex flex-1 overflow-hidden">
         <div className="hidden md:block">

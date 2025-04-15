@@ -8,9 +8,10 @@ import Sidebar from "./Sidebar";
 
 interface HeaderProps {
   onAddTaskClick: () => void;
+  onMobileMenuClick?: () => void;
 }
 
-const Header = ({ onAddTaskClick }: HeaderProps) => {
+const Header = ({ onAddTaskClick, onMobileMenuClick }: HeaderProps) => {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -21,7 +22,7 @@ const Header = ({ onAddTaskClick }: HeaderProps) => {
           <div className="md:hidden mr-2">
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" onClick={onMobileMenuClick}>
                   <Menu size={20} />
                 </Button>
               </SheetTrigger>
