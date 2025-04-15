@@ -112,11 +112,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
       
       if (error) {
-        toast({
-          title: "Login failed",
-          description: error.message,
-          variant: "destructive",
-        });
+        // Handle the specific case where email is not confirmed
+        if (error.message === "Email not confirmed") {
+          toast({
+            title: "Email not confirmed",
+            description: "Please check your email for a confirmation link or try signing up again.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Login failed",
+            description: error.message,
+            variant: "destructive",
+          });
+        }
         setAuthState((prev) => ({ ...prev, isLoading: false }));
         throw error;
       }
@@ -132,6 +141,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setAuthState((prev) => ({ ...prev, isLoading: true }));
     
     try {
+      // For development, disable email confirmation
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -139,6 +149,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           data: {
             name: name,
           },
+          emailRedirectTo: window.location.origin + '/auth',
         },
       });
       
@@ -152,10 +163,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw error;
       }
       
-      toast({
-        title: "Account created",
-        description: "Welcome to QuickTask!",
-      });
+      if (data.user && !data.user.confirmed_at) {
+        toast({
+          title: "Account created",
+          description: "Please check your email for a confirmation link to complete your registration.",
+        });
+        setAuthState((prev) => ({ ...prev, isLoading: false }));
+      } else {
+        toast({
+          title: "Account created",
+          description: "Welcome to QuickTask!",
+        });
+      }
       
       // Auth state will be updated by the listener
     } catch (error: any) {

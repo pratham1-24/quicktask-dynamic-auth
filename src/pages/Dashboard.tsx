@@ -55,7 +55,10 @@ const Dashboard = () => {
   
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <Header onAddTaskClick={() => setIsAddTaskOpen(true)} />
+      <Header 
+        onAddTaskClick={() => setIsAddTaskOpen(true)} 
+        onMobileMenuClick={() => setMobileSidebarOpen(true)}
+      />
       
       <div className="flex flex-1 overflow-hidden">
         <div className="hidden md:block">
